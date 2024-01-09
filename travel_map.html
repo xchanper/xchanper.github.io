@@ -1,0 +1,83 @@
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no, width=device-width">
+    <link rel="stylesheet" href="https://a.amap.com/jsapi_demos/static/demo-center/css/demo-center.css" />
+    <style>
+        html,
+        body,
+        #container {
+            margin: 0;
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container"></div>
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: "4c4e81286a49c64486a59de75fb5afc9",
+        };
+    </script>
+    <script type="text/javascript"
+        src="https://webapi.amap.com/maps?v=2.0&key=76640eae2046df5dfe9f4072494676a3&plugin=AMap.DistrictSearch"></script>
+    <script src="https://a.amap.com/jsapi_demos/static/demo-center/js/demoutils.js"></script>
+    <script type="text/javascript">
+        //初始化地图对象，加载地图
+        var map = new AMap.Map("container", {
+            center: [104.397428, 36.90923],//地图中心点
+            zoom: 4.8, //地图显示的缩放级别
+        });
+
+        var district = null;
+        var polygon;
+        function drawBounds() {
+            //加载行政区划插件
+            if (!district) {
+                //实例化DistrictSearch
+                var opts = {
+                    subdistrict: 0,   //获取边界不需要返回下级行政区
+                    extensions: 'all',  //返回行政区边界坐标组等具体信息
+                    level: 'city'  //查询行政级别为市
+                };
+                district = new AMap.DistrictSearch(opts);
+            }
+
+            //行政区查询
+            district.setLevel("city")
+            cityList = ["盐城", "上海", "杭州", "黄山", "南京", "北京", "长沙", "张家界", "天津", "广州"];
+            for (let city of cityList) {
+                console.log(city);
+                district.search(city, function (status, result) {
+                    if (!result || !result.districtList || !result.districtList[0]) {
+                        console.log('请正确填写名称或更新其他名称');
+                        return
+                    }
+                    var bounds = result.districtList[0].boundaries;
+                    if (bounds) {
+                        //生成行政区划polygon
+                        for (var i = 0; i < bounds.length; i += 1) {//构造MultiPolygon的path
+                            bounds[i] = [bounds[i]]
+                        }
+                        polygon = new AMap.Polygon({
+                            strokeWeight: 1,
+                            path: bounds,
+                            fillOpacity: 0.4,
+                            fillColor: '#80d8ff',
+                            strokeColor: '#0091ea'
+                        });
+                        map.add(polygon)
+                    }
+                });
+            }
+
+        }
+
+        drawBounds();
+    </script>
+</body>
+
+</html>
