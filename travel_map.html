@@ -1,0 +1,97 @@
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no, width=device-width">
+    <link rel="stylesheet" href="https://a.amap.com/jsapi_demos/static/demo-center/css/demo-center.css" />
+    <style>
+        html,
+        body,
+        #container {
+            margin: 0;
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container"></div>
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: "4c4e81286a49c64486a59de75fb5afc9",
+        };
+    </script>
+    <script type="text/javascript"
+    src="https://webapi.amap.com/maps?v=2.0&key=76640eae2046df5dfe9f4072494676a3&plugin=AMap.DistrictSearch"></script>
+    <script src="https://a.amap.com/jsapi_demos/static/demo-center/js/demoutils.js"></script>
+    <script type="text/javascript">
+        //初始化地图对象，加载地图
+        var map = new AMap.Map("container", {
+            center: [104.397428, 36.90923],//地图中心点
+            zoom: 4.2, //地图显示的缩放级别
+        });
+        cityList = [
+                    "盐城市", "上海市", "杭州市", "黄山市", "南京市", 
+                    "北京市", "长沙市", "张家界市", "天津市", "广州市", 
+                    "武汉市", "南昌市", "苏州市", "济南市", "泰安市", 
+                    "湘潭市", "西安市", "萍乡市", "西宁市", "拉萨市",
+                    "林芝市", "山南市", "日喀则市", "那曲市", "兰州市",
+                    "秦皇岛", "威海市", "烟台市", "大连市", "哈尔滨市",
+                    "海口市", "三亚市", "保定市", "成都市", "阿坝藏族羌族自治州",
+                    "廊坊市", "青岛市", "新疆维吾尔自治区", "深圳市", "香港特别行政区", 
+                    "珠海市", "澳门特别行政区"
+                    ];
+        loadCities();
+        
+        var district = null;
+        let polygon;
+        function loadCities() {
+            // 加载行政区划插件
+            let opts = {
+                    subdistrict: 0,     //获取边界不需要返回下级行政区
+                    extensions: 'all',  //返回行政区边界坐标组等具体信息
+                    level: 'city'       //查询行政级别为市
+                };
+            let district = new AMap.DistrictSearch(opts);
+            
+            // 每0.5秒执行一次避免高德QPS限制
+            let index = 0;
+            const intervalId = setInterval(() => {
+                if (index < cityList.length) {
+                    searchCity(district, cityList[index++]);
+                } else {
+                    clearInterval(intervalId); // 完成后清除定时器
+                }
+            }, 500);
+        }
+
+        function searchCity(district, city) {
+            // console.log(city);
+            district.search(city, (status, result) => {
+                if (!result) {
+                    console.log('请正确填写名称或更新其他名称:' + city.name);
+                    return;
+                }
+                drawBounds(result.districtList[0].boundaries);
+            });
+        }
+
+        function drawBounds(bounds) {
+            if (bounds) {
+                //生成行政区划polygon
+                const formattedBounds = bounds.map(bound => [bound]);
+                polygon = new AMap.Polygon({
+                    strokeWeight: 1,
+                    path: formattedBounds,
+                    fillOpacity: 0.4,
+                    fillColor: '#80d8ff',
+                    strokeColor: '#0091ea'
+                });
+                map.add(polygon)
+            }
+        }
+    </script>
+</body>
+
+</html>
