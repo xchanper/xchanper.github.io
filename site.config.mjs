@@ -1,0 +1,60 @@
+export default {
+  title: "chanper",
+  titleSeparator: " | ",
+  subtitle: "Never Stop Exploring",
+  description: "技术、生活、旅行与一些持续好奇的记录。",
+  nav: [
+    { label: "Home", href: "index.html", key: "home" },
+    { label: "Coding", href: "coding.html", key: "coding" },
+    { label: "Life", href: "life.html", key: "life" },
+    { label: "About", href: "intro.html", key: "about" },
+  ],
+  home: {
+    eyebrow: "Personal archive",
+    primaryAction: "读技术",
+    secondaryAction: "看生活",
+    panelEyebrow: "Now",
+    introFallback: "把学到的、走过的、想明白的东西留下来。",
+    libraryEyebrow: "Library",
+    libraryTitle: "最近整理",
+    stats: {
+      posts: "文章",
+      coding: "技术",
+      life: "生活",
+    },
+  },
+  listings: {
+    coding: {
+      eyebrow: "Engineering notes",
+      description: "Java、数据库、分布式系统和工程实践的长期笔记。",
+    },
+    life: {
+      eyebrow: "Life archive",
+      description: "旅行、年度总结、工具折腾和日常兴趣的记录。",
+    },
+  },
+  footer: {
+    left: "独立思考，明辨是非，尊重他人命运",
+    right: "Build by Codex",
+  },
+  analytics: {
+    enabled: true,
+    cnzz51laId: "21843597",
+    googleAnalyticsId: "G-MXLC6EJHG0",
+  },
+  comments: {
+    enabled: true,
+    provider: "Giscus",
+    repo: "xchanper/xchanper.github.io",
+    repoId: "R_kgDOKylTUg",
+    category: "Announcements",
+    categoryId: "DIC_kwDOKylTUs4CbSmD",
+    mapping: "title",
+    strict: false,
+    reactionsEnabled: true,
+    inputPosition: "bottom",
+    lightTheme: "light",
+    darkTheme: "dark",
+    lazyLoading: false,
+  },
+};

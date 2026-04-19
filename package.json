@@ -1,0 +1,16 @@
+{
+  "name": "chanper-modern-blog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "audit:assets": "node scripts/audit-assets.mjs",
+    "preview": "python3 -m http.server 4173 -d dist"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "markdown-it": "^14.1.1",
+    "markdown-it-anchor": "^9.2.0"
+  }
+}
