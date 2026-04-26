@@ -113,9 +113,7 @@ server.listen(PORT, () => {
 const WATCH_PATHS = [
   path.join(root, "content"),
   path.join(root, "public"),
-  path.join(root, "scripts", "build
-    
-    .mjs"),
+  path.join(root, "scripts", "build.mjs"),
   path.join(root, "site.config.mjs"),
 ];
 
