@@ -5,8 +5,8 @@
 ## 命令
 
 ```bash
-pnpm run build
-pnpm run preview
+pnpm run dev      # 启动开发服务器
+pnpm run build    # 生产构建
 ```
 
 构建产物在 `dist/`。内容在 `content/`，静态资源在 `public/`。

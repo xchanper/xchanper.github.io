@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
-    "audit:assets": "node scripts/audit-assets.mjs",
-    "preview": "python3 -m http.server 4173 -d dist"
+    "audit:assets": "node scripts/audit-assets.mjs"
   },
   "dependencies": {
     "gray-matter": "^4.0.3",
+    "highlight.js": "^11.11.1",
     "markdown-it": "^14.1.1",
     "markdown-it-anchor": "^9.2.0"
   }

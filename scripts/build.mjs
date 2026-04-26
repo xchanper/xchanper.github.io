@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import MarkdownIt from "markdown-it";
 import anchor from "markdown-it-anchor";
+import hljs from "highlight.js";
 import site from "../site.config.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,6 +19,13 @@ const md = new MarkdownIt({
   html: true,
   linkify: true,
   typographer: true,
+  highlight(code, lang) {
+    const language = lang && hljs.getLanguage(lang) ? lang : null;
+    const highlighted = language
+      ? hljs.highlight(code, { language, ignoreIllegals: true }).value
+      : hljs.highlightAuto(code).value;
+    return `<pre><code class="hljs${language ? ` language-${language}` : ""}">${highlighted}</code></pre>`;
+  },
 })
   .use(anchor, {
     slugify,
@@ -49,13 +57,23 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   const hrefIndex = token.attrIndex("href");
 
   if (hrefIndex >= 0) {
-    token.attrs[hrefIndex][1] = linkPath(token.attrs[hrefIndex][1], env.depth || 0);
+    const href = linkPath(token.attrs[hrefIndex][1], env.depth || 0);
+    token.attrs[hrefIndex][1] = href;
+    // 外部链接在新标签页打开，并切断 opener 引用
+    if (/^https?:\/\//.test(href)) {
+      if (token.attrIndex("target") < 0) token.attrPush(["target", "_blank"]);
+      if (token.attrIndex("rel") < 0) token.attrPush(["rel", "noopener noreferrer"]);
+    }
   }
 
   return defaultLinkOpenRenderer
     ? defaultLinkOpenRenderer(tokens, idx, options, env, self)
     : self.renderToken(tokens, idx, options);
 };
+
+// 表格加横向滚动容器，防止宽表格在移动端溢出
+md.renderer.rules.table_open = () => '<div class="table-wrap"><table>';
+md.renderer.rules.table_close = () => "</table></div>";
 
 build();
 
@@ -69,7 +87,7 @@ function build() {
 
   for (const post of posts) {
     writePage(
-      path.join(distDir, post.outputPath),
+      path.join(distDir, post.url),
       post.slug === "intro" ? renderAbout(post, normalPosts) : renderPost(post, posts),
     );
   }
@@ -84,9 +102,83 @@ function build() {
     JSON.stringify(normalPosts.map(({ title, url, section, excerpt, date }) => ({ title, url, section, excerpt, date })), null, 2),
   );
 
+  writeSitemap(normalPosts);
+  writeFeed(normalPosts);
   assertNoMissingImages();
 
   console.log(`Built ${posts.length} pages into ${path.relative(root, distDir)}`);
+}
+
+function writeSitemap(posts) {
+  const base = (site.siteUrl || "").replace(/\/$/, "");
+  if (!base) return;
+
+  const staticPages = [
+    { url: "index.html", priority: "1.0" },
+    { url: "coding.html", priority: "0.8" },
+    { url: "life.html", priority: "0.8" },
+    { url: "intro.html", priority: "0.6" },
+  ];
+
+  const allEntries = [
+    ...staticPages.map(({ url, priority }) => `  <url>\n    <loc>${base}/${url}</loc>\n    <priority>${priority}</priority>\n  </url>`),
+    ...posts.map((p) => {
+      const loc = `${base}/${p.url}`;
+      const lastmod = p.date ? `\n    <lastmod>${p.date}</lastmod>` : "";
+      return `  <url>\n    <loc>${loc}</loc>${lastmod}\n    <priority>0.7</priority>\n  </url>`;
+    }),
+  ];
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${allEntries.join("\n")}\n</urlset>`;
+  fs.writeFileSync(path.join(distDir, "sitemap.xml"), xml);
+}
+
+function writeFeed(posts) {
+  const base = (site.siteUrl || "").replace(/\/$/, "");
+  if (!base) return;
+
+  const recent = [...posts].sort(comparePosts).slice(0, 20);
+  const buildDate = new Date().toUTCString();
+
+  const items = recent.map((p) => {
+    const link = `${base}/${p.url}`;
+    const pubDate = p.date ? new Date(p.date).toUTCString() : buildDate;
+    return [
+      "  <item>",
+      `    <title>${escapeXml(p.title)}</title>`,
+      `    <link>${link}</link>`,
+      `    <guid isPermaLink="true">${link}</guid>`,
+      `    <pubDate>${pubDate}</pubDate>`,
+      `    <description>${escapeXml(p.excerpt)}</description>`,
+      "  </item>",
+    ].join("\n");
+  });
+
+  const xml = [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">`,
+    `<channel>`,
+    `  <title>${escapeXml(site.title)}</title>`,
+    `  <link>${base}/</link>`,
+    `  <description>${escapeXml(site.description)}</description>`,
+    `  <language>zh-CN</language>`,
+    `  <lastBuildDate>${buildDate}</lastBuildDate>`,
+    `  <atom:link href="${base}/feed.xml" rel="self" type="application/rss+xml"/>`,
+    ...items,
+    `</channel>`,
+    `</rss>`,
+  ].join("\n");
+
+  fs.writeFileSync(path.join(distDir, "feed.xml"), xml);
+}
+
+function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 function readPosts() {
@@ -100,7 +192,6 @@ function readPosts() {
       const base = path.basename(rel, ".md");
       const slug = rel.replace(/\.md$/, "").split(path.sep).join("-").toLowerCase();
       const url = pageUrl(rel);
-      const outputPath = url;
       const depth = path.dirname(url) === "." ? 0 : path.dirname(url).split("/").length;
       const title = cleanTitle(data.title || firstHeading(body) || titleFromFilename(base));
       const article = slug !== "intro";
@@ -113,12 +204,11 @@ function readPosts() {
         section,
         slug,
         url,
-        outputPath,
         depth,
         title,
         kind: article ? "post" : "page",
         excerpt: slug === "intro" ? "把学到的、走过的、想明白的东西留下来。" : excerptFrom(text),
-        reading: Math.max(1, Math.round(text.length / 650)),
+        
         date,
         data,
         html,
@@ -184,7 +274,7 @@ function renderHome(posts, intro) {
     <div class="article-list">${latest.map((post) => row(post)).join("")}</div>
   `;
 
-  return renderShell({ title: site.title, body, current: "home" });
+  return renderShell({ title: site.title, body, current: "home", pageUrl: "index.html", description: site.description });
 }
 
 function renderListing(title, posts) {
@@ -198,26 +288,49 @@ function renderListing(title, posts) {
     </section>
     <div class="article-list roomy">${posts.map((post) => row(post)).join("")}</div>
   `;
-  return renderShell({ title: pageTitle(title), body, current: key });
+  return renderShell({ title: pageTitle(title), body, current: key, pageUrl: `${key}.html`, description: listing.description });
 }
 
 function renderAbout(post, posts) {
   const links = Array.isArray(post.data.links) ? post.data.links : [];
+  const meta = Array.isArray(post.data.meta) ? post.data.meta : [];
+
+  const metaHtml = meta.length ? `
+    <dl class="about-meta">
+      ${meta.map((item) => `
+        <div>
+          <dt>${escapeHtml(item.label)}</dt>
+          <dd>${item.url ? `<a href="${escapeAttr(item.url)}">${escapeHtml(item.value)}</a>` : escapeHtml(item.value)}</dd>
+        </div>
+      `).join("")}
+    </dl>` : "";
 
   const body = `
-    ${post.html ? `<div class="about-note">${post.html}</div>` : ""}
-    <div class="profile-grid">
-      ${links.map((link) => `
-        <a class="profile-card" href="${linkPath(link.url || "#", 0)}">
-          <img src="${assetPath(link.icon || "", 0)}" alt="">
-          <span>${escapeHtml(link.title || "")}</span>
-          <p>${escapeHtml(link.description || "")}</p>
-        </a>
-      `).join("")}
-    </div>
+    <section class="about-hero">
+      <div class="about-identity">
+        <img class="about-avatar" src="assets/avatar.jpg" alt="">
+        <div>
+          <h1>${escapeHtml(post.title)}</h1>
+          <p class="about-bio">${escapeHtml(site.description)}</p>
+        </div>
+      </div>
+      ${metaHtml}
+    </section>
+    <section class="about-links">
+      <p class="eyebrow">On the internet</p>
+      <div class="profile-grid">
+        ${links.map((link) => `
+          <a class="profile-card" href="${linkPath(link.url || "#", 0)}">
+            <img src="${assetPath(link.icon || "", 0)}" alt="">
+            <span>${escapeHtml(link.title || "")}</span>
+            <p>${escapeHtml(link.description || "")}</p>
+          </a>
+        `).join("")}
+      </div>
+    </section>
   `;
 
-  return renderShell({ title: pageTitle(post.title), body, current: "about" });
+  return renderShell({ title: pageTitle(post.title), body, current: "about", pageUrl: post.url, description: site.description });
 }
 
 function renderPost(post, posts) {
@@ -225,33 +338,36 @@ function renderPost(post, posts) {
     .filter((item) => item.slug !== post.slug && item.section === post.section && item.kind === "post")
     .slice(0, 4);
 
+  const tocHtml = toc(post.html);
   const body = `
     <article class="post-shell">
       <header class="post-header">
         <a class="crumb" href="${relativeUrl(post.section === "coding" ? "coding.html" : post.section === "life" ? "life.html" : "index.html", post.depth)}">${sectionLabel(post.section)}</a>
         <h1>${post.title}</h1>
         <p>${post.excerpt}</p>
-        <div class="meta">
-          <span>${post.reading} min read</span>
-        </div>
+        ${post.date ? `<time class="post-date" datetime="${post.date}">${formatDate(post.date)}</time>` : ""}
       </header>
-      <div class="post-layout">
-        <aside class="toc">${toc(post.html)}</aside>
-        <div class="prose">${post.html}</div>
-      </div>
+      ${tocHtml
+        ? `<div class="post-layout"><aside class="toc">${tocHtml}</aside><div class="prose">${post.html}</div></div>`
+        : `<div class="prose">${post.html}</div>`}
       ${giscusComments(post)}
       ${related.length ? `<section class="related"><h2>继续阅读</h2><div class="feature-grid small">${related.map((item) => card(item, post.depth)).join("")}</div></section>` : ""}
     </article>
   `;
 
-  return renderShell({ title: pageTitle(post.title), body, current: post.section, depth: post.depth });
+  return renderShell({ title: pageTitle(post.title), body, current: post.section, depth: post.depth, pageUrl: post.url, description: post.excerpt });
 }
 
 function pageTitle(title) {
   return `${title}${site.titleSeparator || " | "}${site.title}`;
 }
 
-function renderShell({ title, body, current = "", depth = 0 }) {
+function renderShell({ title, body, current = "", depth = 0, pageUrl: rawPageUrl = "", description = "" }) {
+  const desc = description || site.description;
+  const base = (site.siteUrl || "").replace(/\/$/, "");
+  const canonical = base && rawPageUrl ? `${base}/${rawPageUrl}` : "";
+  const ogType = rawPageUrl && rawPageUrl !== "index.html" && rawPageUrl !== "coding.html" && rawPageUrl !== "life.html" ? "article" : "website";
+
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -260,15 +376,20 @@ function renderShell({ title, body, current = "", depth = 0 }) {
     (() => {
       try {
         const theme = localStorage.getItem("theme");
-        if (theme === "light" || theme === "dark") {
-          document.documentElement.dataset.theme = theme;
-        }
+        document.documentElement.dataset.theme = theme === "dark" ? "dark" : "light";
       } catch {}
     })();
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="${escapeAttr(site.description)}">
+  <meta name="description" content="${escapeAttr(desc)}">
   <title>${escapeHtml(title)}</title>
+  ${canonical ? `<link rel="canonical" href="${escapeAttr(canonical)}">` : ""}
+  ${base ? `<meta property="og:title" content="${escapeAttr(title)}">
+  <meta property="og:description" content="${escapeAttr(desc)}">
+  <meta property="og:type" content="${ogType}">
+  ${canonical ? `<meta property="og:url" content="${escapeAttr(canonical)}">` : ""}
+  <meta property="og:site_name" content="${escapeAttr(site.title)}">` : ""}
+  ${base ? `<link rel="alternate" type="application/rss+xml" title="${escapeAttr(site.title)}" href="${base}/feed.xml">` : ""}
   <link rel="icon" href="${relativeUrl("assets/favicon.ico", depth)}">
   ${analytics()}
   <style>${css()}</style>
@@ -338,25 +459,33 @@ function giscusComments(post) {
   if (!config?.enabled || config.provider !== "Giscus" || !config.repo || !config.repoId || !config.category || !config.categoryId) {
     return "";
   }
-  const loading = config.lazyLoading ? `\n          data-loading="lazy"` : "";
+  const lightTheme = escapeAttr(config.lightTheme || "light");
+  const darkTheme = escapeAttr(config.darkTheme || "dark");
 
   return `
       <section class="comments" aria-label="评论">
         <p class="comments-fallback">评论加载中。如果这里长期空白，请检查 giscus.app / GitHub 是否可访问。</p>
-        <script src="https://giscus.app/client.js"
-          data-repo="${escapeAttr(config.repo)}"
-          data-repo-id="${escapeAttr(config.repoId)}"
-          data-category="${escapeAttr(config.category)}"
-          data-category-id="${escapeAttr(config.categoryId)}"
-          data-mapping="${escapeAttr(config.mapping || "pathname")}"
-          data-strict="${config.strict ? "1" : "0"}"
-          data-reactions-enabled="${config.reactionsEnabled ? "1" : "0"}"
-          data-emit-metadata="0"
-          data-input-position="${escapeAttr(config.inputPosition || "bottom")}"
-          data-theme="preferred_color_scheme"
-          data-lang="zh-CN"${loading}
-          crossorigin="anonymous"
-          async>
+        <script>
+          (function() {
+            var theme = "light";
+            try { theme = localStorage.getItem("theme") === "dark" ? "${darkTheme}" : "${lightTheme}"; } catch {}
+            var s = document.createElement("script");
+            s.src = "https://giscus.app/client.js";
+            s.setAttribute("data-repo", "${escapeAttr(config.repo)}");
+            s.setAttribute("data-repo-id", "${escapeAttr(config.repoId)}");
+            s.setAttribute("data-category", "${escapeAttr(config.category)}");
+            s.setAttribute("data-category-id", "${escapeAttr(config.categoryId)}");
+            s.setAttribute("data-mapping", "${escapeAttr(config.mapping || "pathname")}");
+            s.setAttribute("data-strict", "${config.strict ? "1" : "0"}");
+            s.setAttribute("data-reactions-enabled", "${config.reactionsEnabled ? "1" : "0"}");
+            s.setAttribute("data-emit-metadata", "0");
+            s.setAttribute("data-input-position", "${escapeAttr(config.inputPosition || "bottom")}");
+            s.setAttribute("data-theme", theme);
+            s.setAttribute("data-lang", "zh-CN");${config.lazyLoading ? '\n            s.setAttribute("data-loading", "lazy");' : ""}
+            s.setAttribute("crossorigin", "anonymous");
+            s.async = true;
+            document.currentScript.parentNode.appendChild(s);
+          })();
         </script>
       </section>`;
 }
@@ -382,7 +511,7 @@ function row(post, depth = 0) {
 }
 
 function postMeta(post) {
-  return [formatDate(post.date), `${post.reading} min`].filter(Boolean).join(" · ");
+  return formatDate(post.date) || "";
 }
 
 function formatDate(date) {
@@ -429,32 +558,6 @@ function css() {
   --hero-image-opacity: .46;
   --hero-image-fade: rgba(247, 244, 238, .12);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #121716;
-    --paper: #1b2220;
-    --ink: #edf4ef;
-    --muted: #a5b2ad;
-    --line: rgba(237, 244, 239, .14);
-    --green: #74c69d;
-    --rust: #e29a72;
-    --blue: #90b8df;
-    --gold: #e0c06f;
-    --shadow: 0 24px 90px rgba(0, 0, 0, .36);
-    --header-bg: rgba(18, 23, 22, .82);
-    --panel-bg: rgba(27, 34, 32, .76);
-    --panel-strong: rgba(27, 34, 32, .96);
-    --nav-bg: rgba(237, 244, 239, .86);
-    --nav-link: #26312e;
-    --nav-active-bg: #111716;
-    --nav-active-ink: #f4fbf7;
-    --code-bg: #252d2a;
-    --pre-bg: #090d0c;
-    --pre-ink: #edf4ef;
-    --hero-image-opacity: .5;
-    --hero-image-fade: rgba(18, 23, 22, .18);
-  }
-}
 :root[data-theme="dark"] {
   --bg: #121716;
   --paper: #1b2220;
@@ -490,24 +593,11 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   line-height: 1.7;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) body {
-    background:
-      radial-gradient(circle at 12% 4%, rgba(116, 198, 157, .12), transparent 32rem),
-      radial-gradient(circle at 88% 12%, rgba(144, 184, 223, .11), transparent 34rem),
-      linear-gradient(180deg, #111514 0%, var(--bg) 42%, #151b19 100%);
-  }
-}
 :root[data-theme="dark"] body {
   background:
     radial-gradient(circle at 12% 4%, rgba(116, 198, 157, .12), transparent 32rem),
     radial-gradient(circle at 88% 12%, rgba(144, 184, 223, .11), transparent 34rem),
     linear-gradient(180deg, #111514 0%, var(--bg) 42%, #151b19 100%);
-}
-:root[data-theme="light"] body {
-  background:
-    radial-gradient(circle at 15% 5%, rgba(194, 154, 68, .16), transparent 30rem),
-    linear-gradient(180deg, #fbf7ef 0%, var(--bg) 36%, #eef3ef 100%);
 }
 a { color: inherit; text-decoration: none; }
 img { max-width: 100%; }
@@ -548,10 +638,6 @@ nav a.active, nav a:hover { background: var(--nav-active-bg); color: var(--nav-a
 .theme-toggle .moon-icon { display: none; }
 :root[data-theme="dark"] .theme-toggle .sun-icon { display: none; }
 :root[data-theme="dark"] .theme-toggle .moon-icon { display: block; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .theme-toggle .sun-icon { display: none; }
-  :root:not([data-theme="light"]) .theme-toggle .moon-icon { display: block; }
-}
 .site-search { position: relative; }
 .search-popover {
   position: absolute;
@@ -629,14 +715,20 @@ h1, h2, h3 { line-height: 1.12; letter-spacing: 0; }
 .section-head > a { color: var(--blue); font-weight: 760; }
 .page-hero.compact { display: block; max-width: 48rem; padding-top: 3rem; }
 .page-hero p:last-child { color: var(--muted); font-size: 1.12rem; }
-.section-content { margin: 2rem 0 4rem; }
-.section-content iframe { width: 100%; min-height: 70vh; border: 1px solid var(--line); border-radius: .5rem; background: var(--paper); box-shadow: var(--shadow); }
-.section-content h2 { margin: 2.5rem 0 1rem; font-size: clamp(1.6rem, 3vw, 2.5rem); }
-.section-content img { display: block; width: 100%; height: auto; margin: .75rem 0 2rem; border: 1px solid var(--line); border-radius: .5rem; }
-.profile-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: .8rem; margin-top: clamp(4rem, 12vw, 8rem); }
-.about-note { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: clamp(4rem, 12vw, 8rem); }
-.about-note + .profile-grid { margin-top: 1rem; }
-.about-note h2 { margin: 0; border: 1px solid var(--line); border-radius: 999px; padding: .45rem .75rem; background: var(--panel-bg); color: var(--muted); font-size: .95rem; font-weight: 780; }
+.about-hero { padding: clamp(3rem, 8vw, 5rem) 0 2rem; border-bottom: 1px solid var(--line); margin-bottom: 3rem; }
+.about-identity { display: flex; align-items: center; gap: 1.5rem; margin-bottom: 2rem; }
+.about-avatar { width: 5rem; height: 5rem; border-radius: 50%; object-fit: cover; border: 2px solid var(--line); flex-shrink: 0; }
+.about-identity h1 { margin: 0 0 .35rem; font-size: clamp(2rem, 5vw, 3.5rem); }
+.about-bio { margin: 0; color: var(--muted); font-size: 1.1rem; }
+.about-meta { display: flex; flex-wrap: wrap; gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.about-meta div { display: flex; align-items: center; gap: .5rem; padding: .45rem .85rem; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-bg); font-size: .9rem; }
+.about-meta dt { color: var(--muted); font-weight: 700; }
+.about-meta dt::after { content: ":"; }
+.about-meta dd { margin: 0; font-weight: 650; }
+.about-meta a { color: var(--blue); }
+.about-links { margin-bottom: 5rem; }
+.about-links > .eyebrow { margin-bottom: 1.2rem; }
+.profile-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: .8rem; }
 .profile-card { min-height: 12.5rem; display: flex; flex-direction: column; justify-content: space-between; padding: 1rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--panel-bg); transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .profile-card:hover { transform: translateY(-3px); border-color: rgba(49, 95, 138, .36); box-shadow: 0 16px 50px rgba(24, 31, 30, .08); }
 .profile-card img { width: 3rem; height: 3rem; object-fit: contain; }
@@ -664,6 +756,7 @@ h1, h2, h3 { line-height: 1.12; letter-spacing: 0; }
 .post-header { max-width: 52rem; padding: 4rem 0 2rem; }
 .post-header h1 { margin: .45rem 0 1rem; font-size: clamp(2.6rem, 7vw, 6rem); }
 .post-header p { color: var(--muted); font-size: 1.15rem; }
+.post-date { display: inline-block; margin-top: .9rem; color: var(--rust); font-size: .88rem; font-weight: 800; letter-spacing: .04em; }
 .meta { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; color: var(--muted); }
 .meta span { margin-right: .3rem; font-weight: 800; color: var(--rust); }
 .post-layout { display: grid; grid-template-columns: 13rem minmax(0, 1fr); gap: 3rem; align-items: start; }
@@ -678,8 +771,43 @@ h1, h2, h3 { line-height: 1.12; letter-spacing: 0; }
 .prose a { color: var(--blue); font-weight: 700; }
 .prose img { display: block; margin: 1.3rem auto; border-radius: .5rem; border: 1px solid var(--line); }
 .prose code { border: 1px solid var(--line); border-radius: .32rem; padding: .08rem .3rem; background: var(--code-bg); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.prose pre { overflow: auto; padding: 1rem; border-radius: .5rem; background: var(--pre-bg); color: var(--pre-ink); }
+.prose pre { position: relative; overflow: auto; padding: 1rem; border-radius: .5rem; background: var(--pre-bg); color: var(--pre-ink); }
 .prose pre code { padding: 0; border: 0; background: transparent; color: inherit; }
+.copy-btn {
+  position: absolute;
+  top: .55rem;
+  right: .55rem;
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid rgba(237,244,239,.18);
+  border-radius: .32rem;
+  background: rgba(255,255,255,.07);
+  color: rgba(237,244,239,.55);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s, color .15s, background .15s;
+}
+.copy-btn svg { width: .95rem; height: .95rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.prose pre:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { background: rgba(255,255,255,.14); color: #edf4ef; }
+.copy-btn.copied { color: #74c69d; border-color: rgba(116,198,157,.4); }
+.hljs-comment,.hljs-quote { color: #8fa89e; font-style: italic; }
+.hljs-keyword,.hljs-selector-tag,.hljs-addition { color: #74c69d; }
+.hljs-number,.hljs-literal,.hljs-variable,.hljs-template-variable,.hljs-tag .hljs-attr { color: #90b8df; }
+.hljs-string,.hljs-doctag { color: #e29a72; }
+.hljs-title,.hljs-section,.hljs-selector-id { color: #e0c06f; font-weight: bold; }
+.hljs-subst { font-weight: normal; color: #edf4ef; }
+.hljs-type,.hljs-class .hljs-title { color: #e0c06f; }
+.hljs-tag,.hljs-name,.hljs-attribute { color: #90b8df; }
+.hljs-regexp,.hljs-link { color: #e29a72; }
+.hljs-symbol,.hljs-bullet { color: #a6e3c2; }
+.hljs-built_in,.hljs-builtin-name { color: #90b8df; }
+.hljs-meta { color: #8fa89e; }
+.hljs-deletion { color: #e07070; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: bold; }
 .prose blockquote { margin: 1.3rem 0; padding: .5rem 1rem; border-left: 3px solid var(--gold); background: rgba(194, 154, 68, .09); color: var(--muted); }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; margin: 1.3rem 0; }
@@ -692,6 +820,11 @@ th { background: rgba(45, 106, 79, .08); }
 .comments .giscus-frame { border: 0; color-scheme: light dark; }
 .related { margin-top: 4rem; }
 .site-footer { width: min(1160px, calc(100% - 2rem)); margin: 5rem auto 2rem; padding-top: 1rem; border-top: 1px solid var(--line); display: flex; justify-content: space-between; color: var(--muted); }
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
 @media (max-width: 860px) {
   .site-header { align-items: flex-start; flex-direction: column; }
   .header-actions { width: 100%; align-items: stretch; flex-direction: column; }
@@ -701,7 +834,8 @@ th { background: rgba(45, 106, 79, .08); }
   .hero { grid-template-columns: 1fr; min-height: auto; }
   .hero::before { inset: 1rem -1rem auto 12%; height: 24rem; }
   .hero-panel { border-left: 0; min-height: auto; justify-content: start; }
-  .profile-grid { grid-template-columns: 1fr; }
+  .about-identity { flex-direction: column; align-items: flex-start; }
+  .profile-grid { grid-template-columns: 1fr 1fr; }
   .profile-card { min-height: 8.5rem; }
   .feature-grid, .feature-grid.small { grid-template-columns: 1fr; }
   .stats { grid-template-columns: 1fr; }
@@ -726,48 +860,74 @@ addEventListener("scroll", update, { passive: true });
 update();
 
 const themeToggle = document.querySelector("#theme-toggle");
-const prefersDark = matchMedia("(prefers-color-scheme: dark)");
-const currentTheme = () => document.documentElement.dataset.theme || (prefersDark.matches ? "dark" : "light");
+// mode: "light" | "dark"
+let themeMode = (() => { try { return localStorage.getItem("theme") === "dark" ? "dark" : "light"; } catch { return "light"; } })();
+const applyMode = (mode) => {
+  themeMode = mode;
+  document.documentElement.dataset.theme = mode;
+  try { localStorage.setItem("theme", mode); } catch {}
+  updateThemeButton();
+  syncGiscusTheme();
+};
 const giscusThemes = ${JSON.stringify({
     light: site.comments?.lightTheme || "light",
     dark: site.comments?.darkTheme || "dark",
   })};
-const giscusTheme = () => currentTheme() === "dark" ? giscusThemes.dark : giscusThemes.light;
+const giscusTheme = () => themeMode === "dark" ? giscusThemes.dark : giscusThemes.light;
 const syncGiscusTheme = () => {
   const frame = document.querySelector("iframe.giscus-frame");
   if (!frame) return;
-  frame.contentWindow?.postMessage({
-    giscus: {
-      setConfig: {
-        theme: giscusTheme()
-      }
-    }
-  }, "https://giscus.app");
+  frame.contentWindow?.postMessage({ giscus: { setConfig: { theme: giscusTheme() } } }, "https://giscus.app");
 };
 const updateThemeButton = () => {
   if (!themeToggle) return;
-  const theme = currentTheme();
-  themeToggle.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
-  themeToggle.setAttribute("aria-label", theme === "dark" ? "切换浅色模式" : "切换深色模式");
-  themeToggle.title = theme === "dark" ? "切换浅色模式" : "切换深色模式";
+  const label = themeMode === "light" ? "切换深色模式" : "切换浅色模式";
+  themeToggle.setAttribute("aria-label", label);
+  themeToggle.title = label;
 };
 if (themeToggle) {
-  themeToggle.addEventListener("click", () => {
-    const next = currentTheme() === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem("theme", next);
-    } catch {}
-    updateThemeButton();
-    syncGiscusTheme();
-  });
-  prefersDark.addEventListener("change", () => {
-    updateThemeButton();
-    syncGiscusTheme();
+  themeToggle.addEventListener("click", (event) => {
+    const next = themeMode === "light" ? "dark" : "light";
+    const doApply = () => applyMode(next);
+    if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      doApply();
+      return;
+    }
+    const x = event.clientX ?? innerWidth / 2;
+    const y = event.clientY ?? innerHeight / 2;
+    const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    const transition = document.startViewTransition(doApply);
+    transition.ready.then(() => {
+      const clipPath = [
+        \`circle(0px at \${x}px \${y}px)\`,
+        \`circle(\${radius}px at \${x}px \${y}px)\`,
+      ];
+      document.documentElement.animate(
+        { clipPath },
+        { duration: 400, easing: "ease-in-out", pseudoElement: "::view-transition-new(root)" },
+      );
+    });
   });
   updateThemeButton();
-  setTimeout(syncGiscusTheme, 800);
 }
+
+// bfcache 恢复时重新应用主题（浏览器前进/后退不重新执行脚本，需手动同步）
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) {
+    const saved = (() => { try { return localStorage.getItem("theme") === "dark" ? "dark" : "light"; } catch { return "light"; } })();
+    applyMode(saved);
+  }
+});
+
+// 监听 giscus 就绪消息，加载完成后立即同步一次主题
+window.addEventListener("message", (event) => {
+  if (event.origin !== "https://giscus.app") return;
+  if (event.data?.giscus?.discussion !== undefined || event.data?.giscus?.error !== undefined) return;
+  // giscus 首次渲染完成会发一条含 resizeHeight 的消息
+  if (typeof event.data?.giscus?.resizeHeight === "number") {
+    syncGiscusTheme();
+  }
+});
 
 const searchToggle = document.querySelector(".search-toggle");
 const search = document.querySelector("#site-search");
@@ -836,7 +996,27 @@ function escapeHtmlClient(value) {
 
 function toPageUrl(url, prefix) {
   return /^(https?:|mailto:|#|\\/\\/|data:)/.test(url) ? url : prefix + url;
-}`;
+}
+
+document.querySelectorAll(".prose pre").forEach((pre) => {
+  const btn = document.createElement("button");
+  btn.className = "copy-btn";
+  btn.setAttribute("aria-label", "复制代码");
+  btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  btn.addEventListener("click", () => {
+    const code = pre.querySelector("code")?.innerText ?? pre.innerText;
+    navigator.clipboard.writeText(code).then(() => {
+      btn.classList.add("copied");
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>';
+      setTimeout(() => {
+        btn.classList.remove("copied");
+        btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+      }, 2000);
+    });
+  });
+  pre.appendChild(btn);
+});
+`;
 }
 
 function notFoundTemplate() {
@@ -945,19 +1125,9 @@ function rewriteAssetPaths(html, depth) {
 
 function normalizeLocalAsset(src) {
   if (/^(https?:|mailto:|#|\/\/|data:|blob:)/.test(src)) return src;
+  if (!src.startsWith("/img/") && !src.startsWith("/assets/")) return src;
 
-  const legacyPrefix = "../../src/.vuepress/public/";
-  let normalized = src;
-
-  if (normalized.startsWith(legacyPrefix)) {
-    normalized = `/${normalized.slice(legacyPrefix.length)}`;
-  }
-
-  if (!normalized.startsWith("/img/") && !normalized.startsWith("/assets/")) {
-    return normalized;
-  }
-
-  const [withoutHash] = normalized.split("#");
+  const [withoutHash] = src.split("#");
   const [withoutQuery] = withoutHash.split("?");
 
   try {

@@ -1,5 +1,13 @@
 ---
 title: 关于我
+meta:
+  - label: Job
+    value: Software Engineer
+  - label: Location
+    value: 🇨🇳 Beijing
+  - label: GitHub
+    value: xchanper
+    url: https://github.com/xchanper
 links:
   - icon: /assets/coolapk.svg
     title: 酷安
@@ -12,7 +20,7 @@ links:
   - icon: /assets/keep.svg
     title: Keep
     description: 跑步 1381 公里，骑行 1465 公里
-    url: http://show.gotokeep.com
+    url: https://show.gotokeep.com
   - icon: /assets/500px.svg
     title: 500px
     description: 摄影学习中，尼康风光狗
@@ -22,8 +30,3 @@ links:
     description: 游历 37 城，人生梦想 318
     url: /life/travel-map.html
 ---
-
-
-## Job: Coder
-## Location: 🇨🇳
-## Github: https://github.com/xchanper

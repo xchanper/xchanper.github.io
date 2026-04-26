@@ -3,6 +3,7 @@ export default {
   titleSeparator: " | ",
   subtitle: "Never Stop Exploring",
   description: "技术、生活、旅行与一些持续好奇的记录。",
+  siteUrl: "https://xchanper.github.io",
   nav: [
     { label: "Home", href: "index.html", key: "home" },
     { label: "Coding", href: "coding.html", key: "coding" },
@@ -35,7 +36,7 @@ export default {
   },
   footer: {
     left: "独立思考，明辨是非，尊重他人命运",
-    right: "Build by Codex",
+    right: "Built by Codex",
   },
   analytics: {
     enabled: true,
