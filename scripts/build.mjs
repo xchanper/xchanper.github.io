@@ -195,7 +195,7 @@ function readPosts() {
       const depth = path.dirname(url) === "." ? 0 : path.dirname(url).split("/").length;
       const title = cleanTitle(data.title || firstHeading(body) || titleFromFilename(base));
       const article = slug !== "intro";
-      const html = renderMarkdown(body, depth);
+      const html = renderMarkdown(body, depth, data);
       const text = stripMarkdown(body);
       const date = normalizeDate(data.date);
       return {
@@ -226,13 +226,45 @@ function pageUrl(rel) {
   return rel.split(path.sep).join("/").replace(/\.md$/, ".html");
 }
 
-function renderMarkdown(markdown, depth) {
+function renderMarkdown(markdown, depth, data = {}) {
   const normalized = markdown.replace(
     /<iframe\s+src=(["'][^"']+["'])\s+iframe\s*\/>/gi,
     "<iframe src=$1></iframe>",
   );
 
-  return rewriteAssetPaths(md.render(normalized, { depth }), depth);
+  const rendered = rewriteAssetPaths(md.render(normalized, { depth }), depth);
+  return injectPostFragments(rendered, depth, data);
+}
+
+function injectPostFragments(html, depth, data) {
+  return html
+    .replaceAll("{{TRAVEL_GALLERY}}", renderTravelGallery(data.travelGallery, depth))
+    .replaceAll("{{TRAVEL_MAP_CITY_LIST}}", renderTravelMapCityList(data.travelGallery));
+}
+
+function renderTravelGallery(items, depth) {
+  if (!Array.isArray(items) || !items.length) return "";
+
+  const cards = items.map((item) => {
+    const city = String(item?.city || "").trim();
+    const time = String(item?.time || "").trim();
+    const image = String(item?.image || "").trim();
+    if (!city || !image) return "";
+
+    return `<div class="travel-card"><img src="${assetPath(image, depth)}" loading="lazy" alt="${escapeAttr(city)}"><div class="travel-card-label"><strong>${escapeHtml(city)}</strong><span>${escapeHtml(time)}</span></div></div>`;
+  }).filter(Boolean).join("");
+
+  return cards ? `<div class="travel-gallery">${cards}</div>` : "";
+}
+
+function renderTravelMapCityList(items) {
+  if (!Array.isArray(items) || !items.length) return "";
+
+  return items
+    .map((item) => String(item?.city || "").trim())
+    .filter(Boolean)
+    .map((name) => JSON.stringify(name))
+    .join(",\n    ");
 }
 
 function renderHome(posts, intro) {
