@@ -558,7 +558,7 @@ function searchText(post) {
 function toc(html) {
   const headings = [...html.matchAll(/<h([23]) id="([^"]+)">([\s\S]*?)<\/h[23]>/g)]
     .map((match) => ({ level: Number(match[1]), id: match[2], title: stripHtml(match[3]) }))
-    .slice(0, 18);
+    ;
   if (!headings.length) return "";
   return `<strong>目录</strong>${headings.map((item) => `<a class="l${item.level}" href="#${item.id}">${item.title}</a>`).join("")}`;
 }
