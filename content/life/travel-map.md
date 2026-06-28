@@ -2,6 +2,9 @@
 title: 旅行地图
 date: 1970-01-01
 travelGallery:
+  - city: 迪庆藏族自治州
+    time: 2026.06
+    image: /img/游记/迪庆.jpg
   - city: 亳州市
     time: 2026.05
     image: /img/游记/亳州.jpg
