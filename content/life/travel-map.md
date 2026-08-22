@@ -2,6 +2,12 @@
 title: 旅行地图
 date: 1970-01-01
 travelGallery:
+  - city: 赤峰市
+    time: 2026.07
+    image: /img/游记/赤峰.jpg
+  - city: 张家口市
+    time: 2026.07
+    image: /img/游记/张家口.jpg
   - city: 迪庆藏族自治州
     time: 2026.06
     image: /img/游记/迪庆.jpg
