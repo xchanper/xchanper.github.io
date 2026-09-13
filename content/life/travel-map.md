@@ -2,6 +2,9 @@
 title: 旅行地图
 date: 1970-01-01
 travelGallery:
+  - city: 大同市
+    time: 2026.08
+    image: /img/游记/大同.jpg
   - city: 赤峰市
     time: 2026.07
     image: /img/游记/赤峰.jpg
